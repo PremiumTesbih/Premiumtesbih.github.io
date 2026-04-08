@@ -984,20 +984,102 @@ const d=new Date(o.date);return d.getMonth()===month&&d.getFullYear()===year;
 }
 
 function buildMonthSheet(orders){
-return orders.map(o=>{
+// Chronologisch sortiert, laufende Nummer, jede Kette einzeln
+let rows=[];
+let nr=1;
+orders.sort((a,b)=>new Date(a.date)-new Date(b.date));
+orders.forEach(o=>{
 const cust=cache.customers.find(c=>c.id===o.customerId);
-return {
-Datum:new Date(o.date).toLocaleDateString('de-DE'),
-Kunde:o.customerName,
-TikTok:o.customerTiktok||'',
-Ketten:o.ketten.map(k=>k.name).join(', '),
-'Ketten Preis':o.ketten.reduce((s,k)=>s+k.price,0),
-Versand:o.shipping,
-Land:o.countryName,
-Gesamt:getOrderTotal(o),
-Status:{pending:'Ausstehend',paid:'Bezahlt',shipped:'Versendet'}[o.status]||o.status
-};
+const d=new Date(o.date);
+const datum=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+o.ketten.forEach((k,ki)=>{
+rows.push({
+'Nr.':nr,
+'Datum':datum,
+'Rechnungs-Nr.':o.id,
+'Kunde':o.customerName,
+'TikTok':o.customerTiktok?'@'+o.customerTiktok:'',
+'Artikel':k.name,
+'Artikel-Preis (€)':k.price,
+'Versand (€)':ki===0?o.shipping:0, // Versand nur bei erster Kette
+'Land':o.countryName,
+'Gesamt (€)':ki===0?getOrderTotal(o):k.price,
+'Zahlungsstatus':{pending:'Offen',paid:'Bezahlt',shipped:'Bezahlt & Versendet'}[o.status]||o.status,
+'Zahlungsart':'Überweisung/PayPal',
+'Adresse':cust?[cust.street,cust.zip,cust.city].filter(Boolean).join(', '):''
 });
+nr++;
+});
+});
+return rows;
+}
+
+function buildSummarySheet(orders,monthName,year){
+const kettenTotal=orders.reduce((s,o)=>s+o.ketten.reduce((ss,k)=>ss+k.price,0),0);
+const versandTotal=orders.reduce((s,o)=>s+o.shipping,0);
+const gesamtTotal=orders.reduce((s,o)=>s+getOrderTotal(o),0);
+const bezahlt=orders.filter(o=>o.status==='paid'||o.status==='shipped');
+const offen=orders.filter(o=>o.status==='pending');
+const bezahltTotal=bezahlt.reduce((s,o)=>s+getOrderTotal(o),0);
+const offenTotal=offen.reduce((s,o)=>s+getOrderTotal(o),0);
+
+// Versand nach Land aufschlüsseln
+const landMap={};
+orders.forEach(o=>{
+if(!landMap[o.countryName])landMap[o.countryName]={count:0,versand:0,umsatz:0};
+landMap[o.countryName].count++;
+landMap[o.countryName].versand+=o.shipping;
+landMap[o.countryName].umsatz+=getOrderTotal(o);
+});
+
+const rows=[
+{'Position':'ZUSAMMENFASSUNG','Wert':'','Details':''},
+{'Position':'Zeitraum','Wert':monthName+' '+year,'Details':''},
+{'Position':'Firma','Wert':'Premium Tesbih','Details':''},
+{'Position':'','Wert':'','Details':''},
+{'Position':'UMSATZ','Wert':'','Details':''},
+{'Position':'Anzahl Aufträge','Wert':orders.length,'Details':''},
+{'Position':'Anzahl Ketten verkauft','Wert':orders.reduce((s,o)=>s+o.ketten.length,0),'Details':''},
+{'Position':'Ø Preis pro Kette','Wert':orders.reduce((s,o)=>s+o.ketten.length,0)>0?Math.round(kettenTotal/orders.reduce((s,o)=>s+o.ketten.length,0))+'€':'0€','Details':''},
+{'Position':'','Wert':'','Details':''},
+{'Position':'Warenverkauf (netto)','Wert':kettenTotal.toFixed(2)+'€','Details':'Summe aller Ketten'},
+{'Position':'Versanderlöse','Wert':versandTotal.toFixed(2)+'€','Details':'Weiterberechneter Versand'},
+{'Position':'GESAMTUMSATZ','Wert':gesamtTotal.toFixed(2)+'€','Details':'Warenverkauf + Versand'},
+{'Position':'','Wert':'','Details':''},
+{'Position':'ZAHLUNGSSTATUS','Wert':'','Details':''},
+{'Position':'Bezahlt','Wert':bezahltTotal.toFixed(2)+'€','Details':bezahlt.length+' Aufträge'},
+{'Position':'Offene Forderungen','Wert':offenTotal.toFixed(2)+'€','Details':offen.length+' Aufträge'},
+{'Position':'','Wert':'','Details':''},
+{'Position':'VERSAND NACH LAND','Wert':'','Details':''}
+];
+Object.keys(landMap).sort().forEach(land=>{
+const l=landMap[land];
+rows.push({'Position':land,'Wert':l.umsatz.toFixed(2)+'€','Details':l.count+' Aufträge, Versand: '+l.versand.toFixed(2)+'€'});
+});
+return rows;
+}
+
+function buildCustomerSheet(orders){
+// Kundenumsatz-Übersicht
+const custMap={};
+orders.forEach(o=>{
+if(!custMap[o.customerId])custMap[o.customerId]={name:o.customerName,tiktok:o.customerTiktok||'',orders:0,ketten:0,umsatz:0};
+custMap[o.customerId].orders++;
+custMap[o.customerId].ketten+=o.ketten.length;
+custMap[o.customerId].umsatz+=getOrderTotal(o);
+});
+return Object.values(custMap).sort((a,b)=>b.umsatz-a.umsatz).map((c,i)=>({
+'Nr.':i+1,
+'Kunde':c.name,
+'TikTok':c.tiktok?'@'+c.tiktok:'',
+'Aufträge':c.orders,
+'Ketten':c.ketten,
+'Gesamtumsatz (€)':c.umsatz.toFixed(2)
+}));
+}
+
+function setColWidths(ws,widths){
+ws['!cols']=widths.map(w=>({wch:w}));
 }
 
 function exportMonth(){
@@ -1010,38 +1092,135 @@ function exportSpecific(month,year){
 const orders=getOrdersForMonth(month,year);
 if(!orders.length){showToast('Keine Daten für diesen Monat');return}
 const months=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const monthName=months[month];
 const wb=XLSX.utils.book_new();
-const ws=XLSX.utils.json_to_sheet(buildMonthSheet(orders));
-XLSX.utils.book_append_sheet(wb,ws,'Einzelverkäufe');
-const total=orders.reduce((s,o)=>s+getOrderTotal(o),0);
-const shipping=orders.reduce((s,o)=>s+o.shipping,0);
-const chainTotal=orders.reduce((s,o)=>s+o.ketten.reduce((ss,k)=>ss+k.price,0),0);
-const summary=[{Bezeichnung:'Anzahl Aufträge',Wert:orders.length},{Bezeichnung:'Anzahl Ketten',Wert:orders.reduce((s,o)=>s+o.ketten.length,0)},
-{Bezeichnung:'Ketten Umsatz',Wert:chainTotal+'€'},{Bezeichnung:'Versand Umsatz',Wert:shipping+'€'},{Bezeichnung:'Gesamtumsatz',Wert:total+'€'}];
-XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summary),'Zusammenfassung');
-XLSX.writeFile(wb,`PremiumTesbih_${months[month]}_${year}.xlsx`);
+
+// Sheet 1: Zusammenfassung
+const wsSummary=XLSX.utils.json_to_sheet(buildSummarySheet(orders,monthName,year));
+setColWidths(wsSummary,[30,20,30]);
+XLSX.utils.book_append_sheet(wb,wsSummary,'Zusammenfassung');
+
+// Sheet 2: Einzelverkäufe
+const wsDetails=XLSX.utils.json_to_sheet(buildMonthSheet(orders));
+setColWidths(wsDetails,[5,12,18,20,18,22,14,12,16,12,20,18,30]);
+XLSX.utils.book_append_sheet(wb,wsDetails,'Einzelverkäufe');
+
+// Sheet 3: Kundenumsätze
+const wsCust=XLSX.utils.json_to_sheet(buildCustomerSheet(orders));
+setColWidths(wsCust,[5,22,18,10,8,16]);
+XLSX.utils.book_append_sheet(wb,wsCust,'Kundenumsätze');
+
+// Sheet 4: Offene Forderungen
+const openOrders=orders.filter(o=>o.status==='pending');
+if(openOrders.length){
+const wsOpen=XLSX.utils.json_to_sheet(openOrders.sort((a,b)=>new Date(a.date)-new Date(b.date)).map(o=>{
+const d=new Date(o.date);
+const tage=Math.floor((Date.now()-d.getTime())/(1000*60*60*24));
+return {
+'Datum':d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}),
+'Kunde':o.customerName,
+'Betrag (€)':getOrderTotal(o).toFixed(2),
+'Tage offen':tage,
+'Status':tage>14?'MAHNUNG FÄLLIG':'Offen',
+'TikTok':o.customerTiktok?'@'+o.customerTiktok:''
+};
+}));
+setColWidths(wsOpen,[12,22,12,12,18,18]);
+XLSX.utils.book_append_sheet(wb,wsOpen,'Offene Forderungen');
+}
+
+XLSX.writeFile(wb,`PremiumTesbih_${monthName}_${year}.xlsx`);
 showToast('Export erstellt');
 }
 
 function exportYear(){
 const year=parseInt(document.getElementById('exportYearFull').value);
-const wb=XLSX.utils.book_new();
 const months=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
-let yearTotal=0,yearOrders=0,yearChains=0;
+const allOrders=cache.orders.filter(o=>o.status!=='cancelled'&&new Date(o.date).getFullYear()===year);
+if(!allOrders.length){showToast('Keine Daten für dieses Jahr');return}
+const wb=XLSX.utils.book_new();
+
+// Sheet 1: Jahresübersicht
+let jahresRows=[];
+let sumUmsatz=0,sumAuftraege=0,sumKetten=0,sumVersand=0,sumWare=0;
+months.forEach((mn,i)=>{
+const o=getOrdersForMonth(i,year);
+const ware=o.reduce((s,x)=>s+x.ketten.reduce((ss,k)=>ss+k.price,0),0);
+const versand=o.reduce((s,x)=>s+x.shipping,0);
+const umsatz=ware+versand;
+const ketten=o.reduce((s,x)=>s+x.ketten.length,0);
+sumUmsatz+=umsatz;sumAuftraege+=o.length;sumKetten+=ketten;sumVersand+=versand;sumWare+=ware;
+jahresRows.push({
+'Monat':mn,
+'Aufträge':o.length,
+'Ketten':ketten,
+'Warenverkauf (€)':ware.toFixed(2),
+'Versand (€)':versand.toFixed(2),
+'Gesamtumsatz (€)':umsatz.toFixed(2)
+});
+});
+jahresRows.push({
+'Monat':'GESAMT',
+'Aufträge':sumAuftraege,
+'Ketten':sumKetten,
+'Warenverkauf (€)':sumWare.toFixed(2),
+'Versand (€)':sumVersand.toFixed(2),
+'Gesamtumsatz (€)':sumUmsatz.toFixed(2)
+});
+const wsYear=XLSX.utils.json_to_sheet(jahresRows);
+setColWidths(wsYear,[14,10,8,16,12,16]);
+XLSX.utils.book_append_sheet(wb,wsYear,'Jahresübersicht');
+
+// Sheet 2: Alle Einzelverkäufe des Jahres
+const wsAll=XLSX.utils.json_to_sheet(buildMonthSheet(allOrders));
+setColWidths(wsAll,[5,12,18,20,18,22,14,12,16,12,20,18,30]);
+XLSX.utils.book_append_sheet(wb,wsAll,'Alle Verkäufe');
+
+// Sheet 3: Kundenumsätze Jahresranking
+const wsCust=XLSX.utils.json_to_sheet(buildCustomerSheet(allOrders));
+setColWidths(wsCust,[5,22,18,10,8,16]);
+XLSX.utils.book_append_sheet(wb,wsCust,'Kundenumsätze');
+
+// Sheet 4: Versand nach Land
+const landMap={};
+allOrders.forEach(o=>{
+if(!landMap[o.countryName])landMap[o.countryName]={auftraege:0,ketten:0,versand:0,ware:0};
+landMap[o.countryName].auftraege++;
+landMap[o.countryName].ketten+=o.ketten.length;
+landMap[o.countryName].versand+=o.shipping;
+landMap[o.countryName].ware+=o.ketten.reduce((s,k)=>s+k.price,0);
+});
+const landRows=Object.entries(landMap).sort((a,b)=>b[1].ware-a[1].ware).map(([land,l])=>({
+'Land':land,
+'Aufträge':l.auftraege,
+'Ketten':l.ketten,
+'Warenverkauf (€)':l.ware.toFixed(2),
+'Versand (€)':l.versand.toFixed(2),
+'Gesamt (€)':(l.ware+l.versand).toFixed(2)
+}));
+landRows.push({
+'Land':'GESAMT',
+'Aufträge':sumAuftraege,
+'Ketten':sumKetten,
+'Warenverkauf (€)':sumWare.toFixed(2),
+'Versand (€)':sumVersand.toFixed(2),
+'Gesamt (€)':sumUmsatz.toFixed(2)
+});
+const wsLand=XLSX.utils.json_to_sheet(landRows);
+setColWidths(wsLand,[18,10,8,16,12,14]);
+XLSX.utils.book_append_sheet(wb,wsLand,'Versand nach Land');
+
+// Einzelne Monats-Sheets
 for(let m=0;m<12;m++){
-const orders=getOrdersForMonth(m,year);
-if(orders.length){
-XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(buildMonthSheet(orders)),months[m]);
-yearTotal+=orders.reduce((s,o)=>s+getOrderTotal(o),0);
-yearOrders+=orders.length;yearChains+=orders.reduce((s,o)=>s+o.ketten.length,0);
+const mOrders=getOrdersForMonth(m,year);
+if(mOrders.length){
+const ws=XLSX.utils.json_to_sheet(buildMonthSheet(mOrders));
+setColWidths(ws,[5,12,18,20,18,22,14,12,16,12,20,18,30]);
+XLSX.utils.book_append_sheet(wb,ws,months[m]);
 }
 }
-if(!yearOrders){showToast('Keine Daten für dieses Jahr');return}
-const overview=months.map((mn,i)=>{const o=getOrdersForMonth(i,year);
-return{Monat:mn,Aufträge:o.length,Umsatz:o.reduce((s,x)=>s+getOrderTotal(x),0)+'€'}});
-overview.push({Monat:'GESAMT',Aufträge:yearOrders,Umsatz:yearTotal+'€'});
-XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(overview),'Jahresübersicht');
-XLSX.writeFile(wb,`PremiumTesbih_${year}.xlsx`);
+
+XLSX.writeFile(wb,`PremiumTesbih_Jahresabschluss_${year}.xlsx`);
 showToast('Jahresexport erstellt');
 }
 
