@@ -1266,26 +1266,39 @@ function buildDHLCSVRow(order,cust){
 const addr=splitStreetNumber(cust.street||'');
 const iso3=COUNTRY_ISO3[cust.land||order.countryName]||'DEU';
 const product=getDHLProduct(iso3);
-const s=cache.settings;
+// Empfänger-Namen: Sonderzeichen für DHL ersetzen
+const recvName=latinize(cust.name||'');
+const recvStreet=latinize(addr.street);
+const recvCity=latinize(cust.city||'');
 return [
-dhlField(s.owner||'Premium Tesbih'),  // SEND_NAME1
+dhlField('Yunus Secil'),               // SEND_NAME1
 dhlField(''),                          // SEND_NAME2
-dhlField(''),                          // SEND_STREET  (aus DHL-Konto)
-dhlField(''),                          // SEND_HOUSENUMBER
-dhlField(''),                          // SEND_PLZ
-dhlField(''),                          // SEND_CITY
+dhlField('Martin-Luther-King-Str.'),   // SEND_STREET
+dhlField('33'),                        // SEND_HOUSENUMBER
+dhlField('73037'),                     // SEND_PLZ
+dhlField('Goeppingen'),                // SEND_CITY
 dhlField('DEU'),                       // SEND_COUNTRY
-dhlField(cust.name||''),               // RECV_NAME1
+dhlField(recvName),                    // RECV_NAME1
 dhlField(''),                          // RECV_NAME2
-dhlField(addr.street),                 // RECV_STREET
+dhlField(recvStreet),                  // RECV_STREET
 dhlField(addr.nr),                     // RECV_HOUSENUMBER
 dhlField(cust.zip||''),                // RECV_PLZ
-dhlField(cust.city||''),               // RECV_CITY
+dhlField(recvCity),                    // RECV_CITY
 dhlField(iso3),                        // RECV_COUNTRY
 dhlField(product),                     // PRODUCT
 dhlField(''),                          // COUPON
-dhlField('')                           // SEND_EMAIL (aus DHL-Konto)
+dhlField('')                           // SEND_EMAIL
 ].join(';');
+}
+
+// Deutsche Sonderzeichen → lateinische für DHL
+function latinize(str){
+return (str||'')
+.replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss')
+.replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue')
+.replace(/ş/g,'s').replace(/ğ/g,'g').replace(/ı/g,'i').replace(/ç/g,'c')
+.replace(/Ş/g,'S').replace(/Ğ/g,'G').replace(/İ/g,'I').replace(/Ç/g,'C')
+.replace(/[^ -ÿ]/g,'?');
 }
 
 function getDHLReadyOrders(){
@@ -2283,25 +2296,12 @@ showToast('🗑️ Alle Daten gelöscht');
 }
 
 
-async function startDemo(){
-document.getElementById('lockScreen').style.display='none';
-document.getElementById('app').style.display='flex';
-cache.customers=_TESTDATA.customers;
-cache.orders=_TESTDATA.orders;
-cache.settings={paypal:'info@premiumtesbih.de',iban:'DE89 3704 0044 0532 0130 00',bank:'Commerzbank',owner:'Premium Tesbih'};
-invalidateStats();invalidateOrderIndex();_selectDirty=true;_orderPage=0;_custPage=0;
-buildCountryGrid();loadSettings();populateCustomerSelect();
-renderOrders();renderCustomers();renderOpen();updateDataStats();
-// Backup-Reminder testen — immer anzeigen in Demo
-setTimeout(()=>{
-// Für Demo: PT_reminderShown zurücksetzen damit Reminder sichtbar ist
-localStorage.removeItem('PT_reminderShown');
-checkBackupReminder();
-},1500);
-}
+// Start with PIN screen
 if(document.readyState==='loading'){
-document.addEventListener('DOMContentLoaded',startDemo);
-}else{startDemo();}
+document.addEventListener('DOMContentLoaded',initPinSystem);
+}else{
+initPinSystem();
+}
 </script>
 </body>
 </html>
