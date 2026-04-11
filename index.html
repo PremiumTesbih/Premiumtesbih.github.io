@@ -1298,7 +1298,7 @@ return (str||'')
 .replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue')
 .replace(/ş/g,'s').replace(/ğ/g,'g').replace(/ı/g,'i').replace(/ç/g,'c')
 .replace(/Ş/g,'S').replace(/Ğ/g,'G').replace(/İ/g,'I').replace(/Ç/g,'C')
-.replace(/[^ -ÿ]/g,'?');
+.replace(/[^\u0000-\u00FF]/g,'?');
 }
 
 function getDHLReadyOrders(){
@@ -2224,9 +2224,46 @@ await requestPersistentStorage();
 if('serviceWorker' in navigator){
 try{
 const reg=await navigator.serviceWorker.register('sw.js',{updateViaCache:'none'});
-console.log('Service Worker registered',reg.scope);
+console.log('[SW] Registered',reg.scope);
+
+// Update erkannt → Banner anzeigen
+reg.addEventListener('updatefound',()=>{
+const newWorker=reg.installing;
+newWorker.addEventListener('statechange',()=>{
+if(newWorker.state==='installed'&&navigator.serviceWorker.controller){
+showUpdateBanner();
+}
+});
+});
+
+// Sofort auf Updates prüfen
+reg.update();
+
 }catch(e){console.warn('SW registration failed',e)}
 }
+
+function showUpdateBanner(){
+if(document.getElementById('updateBanner'))return;
+const banner=document.createElement('div');
+banner.id='updateBanner';
+banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9998;background:linear-gradient(135deg,#C8922A,#E8B84B);color:#0A0704;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
+banner.innerHTML='<span>🔄 Update verfügbar!</span><button onclick="applyUpdate()" style="background:#0A0704;color:#E8B84B;border:none;padding:6px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px">Jetzt laden</button>';
+document.body.prepend(banner);
+}
+
+function applyUpdate(){
+if('serviceWorker' in navigator){
+navigator.serviceWorker.getRegistration().then(reg=>{
+if(reg&&reg.waiting)reg.waiting.postMessage('skipWaiting');
+window.location.reload();
+});
+}
+}
+
+let _swRefreshing=false;
+navigator.serviceWorker.addEventListener('controllerchange',()=>{
+if(!_swRefreshing){_swRefreshing=true;window.location.reload();}
+});
 }
 
 
